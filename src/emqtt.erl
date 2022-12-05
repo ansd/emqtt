@@ -21,6 +21,8 @@
 -include("emqtt.hrl").
 -include("logger.hrl").
 
+-export([block/2]).
+
 -export([ start_link/0
         , start_link/1
         ]).
@@ -185,6 +187,7 @@
 
 
 -record(state, {
+          block,
           name            :: atom(),
           owner           :: pid(),
           msg_handler     :: ?NO_HANDLER | msg_handler(),
@@ -918,6 +921,10 @@ connected({call, From}, resume, State) ->
 
 connected({call, From}, clientid, #state{clientid = ClientId}) ->
     {keep_state_and_data, [{reply, From, ClientId}]};
+
+connected({call, From}, {block, Block}, State) ->
+    io:format("aaa block=~p~n", [Block]),
+    {keep_state, State#state{block = Block}, [{reply, From, ok}]};
 
 connected({call, From}, SubReq = {subscribe, Properties, Topics},
           State = #state{last_packet_id = PacketId, subscriptions = Subscriptions}) ->
@@ -1690,8 +1697,22 @@ send(Packet, State = #state{conn_mod = ConnMod, socket = Sock, proto_ver = Ver})
         Error -> Error
     end.
 
-run_sock(State = #state{conn_mod = ConnMod, socket = Sock}) ->
-    ConnMod:setopts(Sock, [{active, once}]), State.
+run_sock(State = #state{block = true}) ->
+    io:format("aaa blocked~n"),
+    State;
+run_sock(State = #state{conn_mod = ConnMod, socket = Sock, block = N})
+  when is_number(N) ->
+    io:format("aaa blocking for ~bms~n", [N]),
+    timer:sleep(N),
+    ConnMod:setopts(Sock, [{active, once}]),
+    State;
+run_sock(State = #state{conn_mod = ConnMod, socket = Sock, block = B}) ->
+    io:format("aaa activating socket block=~p~n", [B]),
+    ConnMod:setopts(Sock, [{active, once}]),
+    State.
+
+block(Client, Block) ->
+    gen_statem:call(Client, {block, Block}).
 
 %%--------------------------------------------------------------------
 %% Process incomming
